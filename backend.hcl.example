@@ -1,0 +1,4 @@
+organization = "<YOUR_ORGANIZATION>"
+workspaces {
+  name = "<YOUR_WORKSPACE_NAME>"
+} 
