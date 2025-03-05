@@ -118,11 +118,11 @@ resource "aws_security_group" "vpce_sg" {
   vpc_id      = aws_vpc.casegrid_vpc.id
 
   ingress {
-    description = "HTTPS from private subnet"
+    description = "HTTPS from private and public subnets"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = [var.private_subnet_cidr]
+    cidr_blocks = [var.private_subnet_cidr, var.public_subnet_cidr]
   }
 
   tags = {

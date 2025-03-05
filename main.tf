@@ -49,7 +49,16 @@ resource "aws_security_group" "windows_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Allow all outbound traffic to VPC endpoints and internet
+  # Explicit rule for SSM VPC endpoints
+  egress {
+    description = "HTTPS to VPC endpoints"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.private_subnet_cidr]  # VPC endpoints are in private subnet
+  }
+
+  # Allow all other outbound traffic
   egress {
     from_port   = 0
     to_port     = 0
