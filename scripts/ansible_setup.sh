@@ -1,229 +1,92 @@
 #!/bin/bash
 
-# =====================================================
-# Enhanced AWS SSM Ansible Automation Script
-# =====================================================
-# This script configures an Ansible control node to manage
-# Windows servers via AWS SSM, with improved diagnostics
-# and error handling for troubleshooting connections.
-# =====================================================
+# Exit on any error
+set -e
+
+# Install AWS CLI first
+if ! command -v aws &> /dev/null; then
+    echo "Installing AWS CLI..."
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    apt-get update && apt-get install -y unzip
+    unzip awscliv2.zip
+    ./aws/install
+    rm -rf aws awscliv2.zip
+else
+    echo "AWS CLI already installed: $(aws --version)"
+fi
 
 # CloudWatch Log configuration
 LOG_GROUP="/${project_name}/${environment}/ansible-setup"
 LOG_STREAM="ansible-$(date +%Y-%m-%d-%H-%M-%S)"
 
-# Simple logging function that writes to both CloudWatch and stdout
+# Simple logging function
 log_message() {
-    message="$1"
-    
-    # Attempt to log the message to CloudWatch
+    local message="$1"
     aws logs put-log-events \
         --log-group-name "$LOG_GROUP" \
         --log-stream-name "$LOG_STREAM" \
-        --log-events timestamp=$(date +%s000),message="$message" \
-        2>/dev/null || {
-            # Log error if writing to CloudWatch fails
-            echo "Failed to log message to CloudWatch: $message"
-        }
-    
-    # Also print the message to stdout
+        --log-events timestamp=$(date +%s000),message="$message" 2>/dev/null || echo "Failed to log to CloudWatch: $message"
     echo "$message"
 }
 
-# Create log group and stream if they do not exist
+# Setup CloudWatch logs
 aws logs create-log-group --log-group-name "$LOG_GROUP" 2>/dev/null || true
 aws logs create-log-stream --log-group-name "$LOG_GROUP" --log-stream-name "$LOG_STREAM" 2>/dev/null || true
 
-# Redirect stdout and stderr to both syslog and our logging function
-exec 1> >(tee >(logger -s -t $(basename $0)) >(while read line; do log_message "$line"; done))
-exec 2>&1
-
-# Exit on any error
-set -e
-
-# Function to handle errors
-handle_error() {
-    echo "Error occurred in script at line: $1"
-    exit 1
-}
-
-trap 'handle_error $LINENO' ERR
+# Redirect stdout to logging function
+exec > >(while read -r line; do log_message "$line"; done) 2>&1
 
 # Wait for cloud-init to complete
-echo "Waiting for cloud-init to complete..."
-while [ ! -f /var/lib/cloud/instance/boot-finished ]; do
-  sleep 1
-done
+log_message "Waiting for cloud-init to complete..."
+while [ ! -f /var/lib/cloud/instance/boot-finished ]; do sleep 1; done
 
 # Install required packages
-echo "Installing required packages..."
-if ! sudo apt-get update; then
-    echo "Failed to update package list"
-    exit 1
-fi
-
-if ! sudo apt-get install -y software-properties-common python3-pip; then
-    echo "Failed to install software-properties-common and python3-pip"
-    exit 1
-fi
-
-if ! sudo add-apt-repository --yes --update ppa:ansible/ansible; then
-    echo "Failed to add Ansible repository"
-    exit 1
-fi
-
-if ! sudo apt-get install -y ansible; then
-    echo "Failed to install Ansible"
-    exit 1
-fi
-
-# Install AWS CLI if not present
-if ! command -v aws &> /dev/null; then
-    log_message "AWS CLI not found. Installing AWS CLI..."
-    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-    sudo apt-get install -y unzip
-    unzip awscliv2.zip
-    sudo ./aws/install
-    rm -rf aws awscliv2.zip
-else
-    log_message "AWS CLI is already installed"
-fi
+log_message "Installing required packages..."
+apt-get update && apt-get install -y python3-pip ansible snapd
 
 # Install AWS Session Manager plugin if not present
 if ! command -v session-manager-plugin &> /dev/null; then
-    log_message "Session Manager plugin not found. Installing Session Manager plugin..."
-    curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
-    sudo dpkg -i session-manager-plugin.deb
-    rm session-manager-plugin.deb
+    log_message "Installing Session Manager plugin..."
+    snap install amazon-ssm-agent --classic
+    snap enable amazon-ssm-agent
+    snap start amazon-ssm-agent
 else
-    log_message "Session Manager plugin is already installed"
+    log_message "Session Manager plugin already installed"
 fi
 
-# Verify AWS CLI installation
-aws_version=$(aws --version 2>&1)
-if [ $? -eq 0 ]; then
-    log_message "AWS CLI verification successful: $aws_version"
-else
-    log_message "AWS CLI verification failed"
-    exit 1
-fi
-
-# Verify Session Manager plugin installation
-sm_version=$(session-manager-plugin --version 2>&1)
-if [ $? -eq 0 ]; then
-    log_message "Session Manager plugin verification successful: $sm_version"
-else
-    log_message "Session Manager plugin verification failed"
-    exit 1
-fi
-
-# Install required Python packages and Ansible collections
-echo "Installing Python packages..."
-if ! pip3 install boto3 botocore ansible[aws]; then
-    echo "Failed to install Python packages"
-    exit 1
-fi
-
-echo "Installing Ansible collections..."
-if ! ansible-galaxy collection install ansible.windows; then
-    echo "Failed to install Ansible Windows collection"
-    exit 1
-fi
-
-# Install AWS SSM agent
-echo "Installing AWS SSM agent..."
-if ! sudo snap install amazon-ssm-agent --classic; then
-    echo "Failed to install AWS SSM agent"
-    exit 1
-fi
-
-# Verify SSM agent is running
-echo "Verifying SSM agent status..."
-if ! sudo systemctl is-active --quiet amazon-ssm-agent; then
-    echo "AWS SSM agent is not running"
-    exit 1
-fi
+# Install Python packages
+log_message "Installing Python packages..."
+pip3 install boto3 botocore
 
 # Setup Ansible configuration
-echo "Setting up Ansible configuration..."
-sudo mkdir -p /etc/ansible
-sudo tee /etc/ansible/ansible.cfg > /dev/null <<'EOL'
-${ansible_config}
-EOL
+log_message "Setting up Ansible..."
+mkdir -p /etc/ansible /home/ubuntu/ansible
+echo "${ansible_config}" > /etc/ansible/ansible.cfg
+echo "${ansible_inventory}" > /etc/ansible/hosts
+echo "${validation_playbook}" > /home/ubuntu/ansible/validate_connection.yml
+echo "${ansible_playbook}" > /home/ubuntu/ansible/install_iis.yml
 
-# Create inventory file
-sudo tee /etc/ansible/hosts > /dev/null <<EOL
-${ansible_inventory}
-EOL
-
-# Copy playbooks
-sudo mkdir -p /home/ubuntu/ansible
-
-# Copy the validation playbook
-sudo tee /home/ubuntu/ansible/validate_connection.yml > /dev/null <<EOL
-${validation_playbook}
-EOL
-
-# Copy the IIS installation playbook
-sudo tee /home/ubuntu/ansible/install_iis.yml > /dev/null <<EOL
-${ansible_playbook}
-EOL
-
-# Create playbook execution script with improved error handling and validation first
-sudo tee /home/ubuntu/ansible/run_playbook.sh > /dev/null <<'EOL'
+# Create and schedule playbook execution script
+log_message "Creating playbook execution script..."
+cat > /home/ubuntu/ansible/run_playbook.sh <<'EOL'
 #!/bin/bash
-
-# Exit on error
 set -e
-
-# Function to log to CloudWatch
 log_message() {
-    message="$1"
-    aws logs put-log-events \
-        --log-group-name "$LOG_GROUP" \
-        --log-stream-name "$LOG_STREAM" \
-        --log-events timestamp=$(date +%s000),message="$message" \
-        2>/dev/null || echo "Failed to log to CloudWatch: $message"
-    echo "$message"
+    local msg="$1"
+    aws logs put-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$LOG_STREAM" --log-events timestamp=$(date +%s000),message="$msg" 2>/dev/null || echo "Failed to log: $msg"
+    echo "$msg"
 }
-
 cd /home/ubuntu/ansible
-ANSIBLE_HOST_KEY_CHECKING=False 
-
-# STEP 1: Run the validation playbook first
-log_message "Running connection validation playbook..."
-ansible-playbook validate_connection.yml -v
-if [ $? -ne 0 ]; then
-    log_message "ERROR: Connection validation failed. Cannot proceed with IIS installation."
-    log_message "Please check the Windows server configuration and AWS SSM connectivity."
-    exit 1
-else
-    log_message "SUCCESS: Connection validation completed successfully."
-fi
-
-# STEP 2: If validation succeeds, proceed with IIS installation
-log_message "Proceeding with IIS installation playbook..."
-ansible-playbook install_iis.yml -v
-if [ $? -ne 0 ]; then
-    log_message "ERROR: IIS installation failed."
-    exit 1
-fi
-
-log_message "SUCCESS: IIS installation completed successfully."
-log_message "All playbooks executed successfully."
+ANSIBLE_HOST_KEY_CHECKING=False
+log_message "Validating connection..."
+ansible-playbook validate_connection.yml -v || { log_message "Validation failed"; exit 1; }
+log_message "Installing IIS..."
+ansible-playbook install_iis.yml -v || { log_message "IIS installation failed"; exit 1; }
+log_message "Setup completed successfully"
 EOL
 
-sudo chmod +x /home/ubuntu/ansible/run_playbook.sh
+chmod +x /home/ubuntu/ansible/run_playbook.sh
+log_message "Scheduling playbook execution in 3 minutes..."
+(sleep 180 && /home/ubuntu/ansible/run_playbook.sh) &
 
-# Schedule the playbook execution for after a short delay
-log_message "Scheduling Ansible playbook execution..."
-# Wait for 3 minutes before running playbooks to allow systems to fully initialize
-(sleep 180 && /home/ubuntu/ansible/run_playbook.sh 2>&1 | logger -t ansible-playbook) &
-log_message "Playbook execution scheduled. It will run in 3 minutes."
-log_message "The validate_connection.yml playbook will first verify connectivity before attempting IIS installation."
-
-# Get all EC2 instance IDs with appropriate tag
-WINDOWS_INSTANCE_ID=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=${project_name}-windows" --query "Reservations[].Instances[].InstanceId" --output text)
-REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
-
-echo "Setup completed successfully"
+log_message "Setup completed successfully"
