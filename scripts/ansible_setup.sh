@@ -77,37 +77,45 @@ if ! sudo apt-get install -y ansible; then
     exit 1
 fi
 
-# Install AWS CLI
-# echo "Installing AWS CLI..."
-# curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-# sudo apt-get install -y unzip
-# unzip awscliv2.zip
-# sudo ./aws/install
-# rm -rf aws awscliv2.zip
-
-# Install AWS Session Manager plugin
-# echo "Installing Session Manager plugin..."
-# curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
-# sudo dpkg -i session-manager-plugin.deb
-# rm session-manager-plugin.deb
-
-# ------- Check AWS CLI installation
-if aws --version > /dev/null 2>&1; then
-    log_message "AWS CLI is installed successfully"
+# Install AWS CLI if not present
+if ! command -v aws &> /dev/null; then
+    log_message "AWS CLI not found. Installing AWS CLI..."
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    sudo apt-get install -y unzip
+    unzip awscliv2.zip
+    sudo ./aws/install
+    rm -rf aws awscliv2.zip
 else
-    log_message "AWS CLI is not installed"
+    log_message "AWS CLI is already installed"
+fi
+
+# Install AWS Session Manager plugin if not present
+if ! command -v session-manager-plugin &> /dev/null; then
+    log_message "Session Manager plugin not found. Installing Session Manager plugin..."
+    curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
+    sudo dpkg -i session-manager-plugin.deb
+    rm session-manager-plugin.deb
+else
+    log_message "Session Manager plugin is already installed"
+fi
+
+# Verify AWS CLI installation
+aws_version=$(aws --version 2>&1)
+if [ $? -eq 0 ]; then
+    log_message "AWS CLI verification successful: $aws_version"
+else
+    log_message "AWS CLI verification failed"
     exit 1
 fi
 
-# Check Session Manager plugin installation
-if session-manager-plugin --version > /dev/null 2>&1; then
-    log_message "Session Manager plugin is installed successfully"
+# Verify Session Manager plugin installation
+sm_version=$(session-manager-plugin --version 2>&1)
+if [ $? -eq 0 ]; then
+    log_message "Session Manager plugin verification successful: $sm_version"
 else
-    log_message "Session Manager plugin is not installed"
+    log_message "Session Manager plugin verification failed"
     exit 1
 fi
-
-# -------
 
 # Install required Python packages and Ansible collections
 echo "Installing Python packages..."
@@ -128,11 +136,6 @@ if ! sudo snap install amazon-ssm-agent --classic; then
     echo "Failed to install AWS SSM agent"
     exit 1
 fi
-
-# Enable and start SSM agent with verification
-# echo "Configuring SSM agent..."
-# sudo systemctl enable amazon-ssm-agent
-# sudo systemctl start amazon-ssm-agent
 
 # Verify SSM agent is running
 echo "Verifying SSM agent status..."
