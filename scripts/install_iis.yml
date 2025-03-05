@@ -1,0 +1,15 @@
+---
+- name: Install IIS on Windows Servers
+  hosts: windows
+  gather_facts: false
+  tasks:
+    - name: Install IIS using PowerShell
+      ansible.windows.win_powershell:
+        script: |
+          Install-WindowsFeature -Name Web-Server -IncludeManagementTools
+      register: iis_install
+
+    - name: Display IIS installation results
+      debug:
+        var: iis_install.stdout_lines
+      when: iis_install.stdout_lines is defined 

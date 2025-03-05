@@ -1,0 +1,119 @@
+---
+# Playbook: validate_connection.yml
+# Purpose: Test connectivity between Ansible and Windows servers via AWS SSM
+# This playbook runs before install_iis.yml to ensure the connection is working properly
+
+- name: Validate AWS SSM connection to Windows server
+  hosts: windows
+  gather_facts: false  # Initially skip fact gathering as it can fail if connection is problematic
+  tasks:
+    - name: Display connection information
+      debug:
+        msg: "Testing connection to {{ inventory_hostname }} via AWS SSM"
+
+    # Step 1: Basic connectivity test with a simple command
+    - name: Perform basic Windows command test
+      ansible.windows.win_shell: echo "Connection successful"
+      register: echo_result
+      ignore_errors: true
+
+    - name: Display basic connectivity results
+      debug:
+        msg: "Basic connectivity test {{ 'PASSED' if echo_result.rc == 0 else 'FAILED' }}"
+        
+    - name: Fail if basic connectivity test failed
+      fail:
+        msg: "Could not establish basic connectivity to Windows server via AWS SSM"
+      when: echo_result.rc != 0
+
+    # Step 2: Verify Windows PowerShell is working properly
+    - name: Check PowerShell version
+      ansible.windows.win_powershell:
+        script: |
+          $PSVersionTable.PSVersion | Select-Object Major, Minor
+      register: ps_version
+      
+    - name: Display PowerShell version
+      debug:
+        var: ps_version.output
+        
+    # Step 3: Verify Windows features service is available
+    - name: Check availability of Windows features
+      ansible.windows.win_powershell:
+        script: |
+          Get-Command -Name Get-WindowsFeature -ErrorAction SilentlyContinue
+          if ($?) {
+              Write-Output "Windows Features service is available"
+          } else {
+              Write-Output "Windows Features service is NOT available"
+              exit 1
+          }
+      register: features_check
+      ignore_errors: true
+      
+    - name: Display Windows features service status
+      debug:
+        var: features_check.output
+        
+    - name: Fail if Windows features service is not available
+      fail:
+        msg: "Windows Features service is not available. Cannot proceed with IIS installation."
+      when: features_check.rc != 0
+
+    # Step 4: Check if IIS is already installed
+    - name: Check if IIS is already installed
+      ansible.windows.win_powershell:
+        script: |
+          $iisFeature = Get-WindowsFeature -Name Web-Server
+          if ($iisFeature.Installed) {
+              Write-Output "IIS is already installed"
+          } else {
+              Write-Output "IIS is not installed"
+          }
+      register: iis_check
+      
+    - name: Display IIS installation status
+      debug:
+        var: iis_check.output
+
+    # Step 5: Verify server connectivity and responsiveness
+    - name: Test server responsiveness
+      ansible.windows.win_shell: |
+        $startTime = Get-Date
+        1..3 | ForEach-Object {
+            Write-Output "Ping test $_ at $(Get-Date)"
+            Start-Sleep -Seconds 1
+        }
+        $endTime = Get-Date
+        Write-Output "Test completed in $(($endTime - $startTime).TotalSeconds) seconds"
+      register: ping_test
+      
+    - name: Display server responsiveness results
+      debug:
+        var: ping_test.stdout_lines
+        
+    # Step 6: Gather facts after basic connectivity is confirmed
+    - name: Gather Windows facts
+      setup:
+      register: setup_result
+      ignore_errors: true
+      
+    - name: Display Windows system information
+      debug:
+        msg: 
+          - "OS Family: {{ setup_result.ansible_facts.ansible_os_family | default('Unknown') }}"
+          - "OS Version: {{ setup_result.ansible_facts.ansible_os_version | default('Unknown') }}"
+      when: setup_result is success
+      
+    - name: Connection validation summary
+      debug:
+        msg: 
+          - "============================================="
+          - "CONNECTION VALIDATION COMPLETE"
+          - "Basic connectivity: {{ 'PASSED' if echo_result.rc == 0 else 'FAILED' }}"
+          - "PowerShell available: {{ 'PASSED' if ps_version is success else 'FAILED' }}"
+          - "Windows Features service: {{ 'PASSED' if features_check.rc == 0 else 'FAILED' }}"
+          - "Fact gathering: {{ 'PASSED' if setup_result is success else 'FAILED' }}"
+          - "============================================="
+          - "Ready to proceed with IIS installation"
+
