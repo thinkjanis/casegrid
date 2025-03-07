@@ -5,11 +5,33 @@ $ErrorActionPreference = "Stop"
 function Write-Log {
     param($Message)
     
-    # Write to PowerShell console
-    Write-Host $Message
+    # Get timestamp for better logging
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $formattedMessage = "[$timestamp] $Message"
     
-    # Write to EC2 Console Log (via COM1 serial port)
-    $Message | Out-File -FilePath '\\.\COM1' -Append
+    # Write to PowerShell console
+    Write-Host $formattedMessage
+    
+    # Write to EC2 Console Log (via COM1 serial port) - this appears in AWS Console's "Get System Log"
+    try {
+        $formattedMessage | Out-File -FilePath '\\.\COM1' -Append -ErrorAction SilentlyContinue
+    }
+    catch {
+        # If COM1 is not available (e.g., when testing locally), just continue
+        Write-Host "Note: Unable to write to COM1 port"
+    }
+}
+
+# Function to handle errors consistently
+function Handle-Error {
+    param(
+        [string]$FunctionName,
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+    
+    Write-Log "ERROR in $FunctionName : $($ErrorRecord.Exception.Message)"
+    Write-Log "Stack trace: $($ErrorRecord.ScriptStackTrace)"
+    exit 1
 }
 
 try {
@@ -23,8 +45,7 @@ try {
         Write-Log "Administrator password set successfully"
     }
     catch {
-        Write-Log "Failed to set administrator password: $_"
-        exit 1
+        Handle-Error -FunctionName "Set-AdminPassword" -ErrorRecord $_
     }
 
     # Configure Windows Firewall
@@ -35,8 +56,7 @@ try {
         Write-Log "Firewall rules configured successfully"
     }
     catch {
-        Write-Log "Failed to configure firewall rules: $_"
-        exit 1
+        Handle-Error -FunctionName "Configure-Firewall" -ErrorRecord $_
     }
 
     # Verify configurations
@@ -51,8 +71,7 @@ try {
             exit 1
         }
     } catch {
-        Write-Log "Failed to verify administrator account: $_"
-        exit 1
+        Handle-Error -FunctionName "Verify-AdminAccount" -ErrorRecord $_
     }
     
     # Verify firewall rules
@@ -67,8 +86,7 @@ try {
         }
         Write-Log "Firewall rules verified successfully"
     } catch {
-        Write-Log "Failed to verify firewall rules: $_"
-        exit 1
+        Handle-Error -FunctionName "Verify-FirewallRules" -ErrorRecord $_
     }
 
     # Test network connectivity
@@ -81,8 +99,7 @@ try {
         }
         Write-Log "Network connectivity verified successfully"
     } catch {
-        Write-Log "Failed to test network connectivity: $_"
-        exit 1
+        Handle-Error -FunctionName "Test-NetworkConnectivity" -ErrorRecord $_
     }
 
     # ======================================================
@@ -117,8 +134,7 @@ try {
             Write-Log "SSM Agent installed successfully"
         }
         catch {
-            Write-Log "Failed to install SSM Agent: $_"
-            exit 1
+            Handle-Error -FunctionName "Install-SSMAgent" -ErrorRecord $_
         }
     }
     else {
@@ -179,13 +195,11 @@ try {
         }
     }
     catch {
-        Write-Log "Error configuring or verifying SSM Agent: $_"
-        exit 1
+        Handle-Error -FunctionName "Configure-SSMAgent" -ErrorRecord $_
     }
 
     Write-Log "All configurations completed successfully"
 }
 catch {
-    Write-Log "Unexpected error: $_"
-    exit 1
+    Handle-Error -FunctionName "Main" -ErrorRecord $_
 }

@@ -3,12 +3,24 @@
 # Exit on any error
 set -e
 
-# Simple logging function that writes to console and system log (visible in EC2 console)
+# Simple logging function
 log_message() {
     local message="$1"
     echo "$message"
+    # Single logging method that works with both console and EC2 system log
     logger -t "ansible-setup" "$message"
 }
+
+# Error handling function
+handle_error() {
+    local exit_code=$?
+    local line_number=$1
+    log_message "Error on line $line_number: Command exited with status $exit_code"
+    exit $exit_code
+}
+
+# Set up trap for error handling
+trap 'handle_error $LINENO' ERR
 
 # Install AWS CLI first
 if ! command -v aws &> /dev/null; then
@@ -36,6 +48,37 @@ if ! command -v session-manager-plugin &> /dev/null; then
     snap install amazon-ssm-agent --classic
     snap enable amazon-ssm-agent
     snap start amazon-ssm-agent
+    
+    # Verify SSM Agent is running properly
+    log_message "Verifying SSM Agent status..."
+    sleep 5
+    SSM_STATUS=$(snap services amazon-ssm-agent | grep amazon-ssm-agent | awk '{print $2}')
+    
+    if [ "$SSM_STATUS" != "active" ]; then
+        log_message "SSM Agent is not running! Attempting to restart..."
+        snap restart amazon-ssm-agent
+        sleep 5
+        SSM_STATUS=$(snap services amazon-ssm-agent | grep amazon-ssm-agent | awk '{print $2}')
+        
+        if [ "$SSM_STATUS" != "active" ]; then
+            log_message "Failed to start SSM Agent. Installation may have issues."
+            # Not exiting with error as the instance might still be usable
+        fi
+    else
+        log_message "SSM Agent is running properly"
+    fi
+    
+    # Check SSM Agent registration status
+    log_message "Checking SSM Agent registration status..."
+    if [ -f /var/log/amazon/ssm/amazon-ssm-agent.log ]; then
+        if grep -q "Successfully registered the instance" /var/log/amazon/ssm/amazon-ssm-agent.log; then
+            log_message "SSM Agent successfully registered with AWS SSM service"
+        else
+            log_message "Warning: Could not confirm SSM Agent registration in logs. This might be normal for a new instance."
+        fi
+    else
+        log_message "Warning: SSM Agent log file not found. Cannot verify registration status."
+    fi
 else
     log_message "Session Manager plugin already installed"
 fi
@@ -56,11 +99,25 @@ log_message "Creating playbook execution script..."
 cat > /home/ubuntu/ansible/run_playbook.sh <<'EOL'
 #!/bin/bash
 set -e
+
+# Error handling function
+handle_error() {
+    local exit_code=$?
+    local line_number=$1
+    echo "Error on line $line_number: Command exited with status $exit_code" | logger -t "ansible-playbook"
+    exit $exit_code
+}
+
+# Set up trap for error handling
+trap 'handle_error $LINENO' ERR
+
+# Simple logging function
 log_message() {
     local msg="$1"
     echo "$msg"
-    logger -t "ansible-setup" "$msg"
+    logger -t "ansible-playbook" "$msg"
 }
+
 cd /home/ubuntu/ansible
 ANSIBLE_HOST_KEY_CHECKING=False
 log_message "Installing IIS..."
