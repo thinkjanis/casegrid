@@ -3,23 +3,24 @@
 # Exit on any error
 set -e
 
+# Simple logging function that writes to console and system log (visible in EC2 console)
+log_message() {
+    local message="$1"
+    echo "$message"
+    logger -t "ansible-setup" "$message"
+}
+
 # Install AWS CLI first
 if ! command -v aws &> /dev/null; then
-    echo "Installing AWS CLI..."
+    log_message "Installing AWS CLI..."
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
     apt-get update && apt-get install -y unzip
     unzip awscliv2.zip
     ./aws/install
     rm -rf aws awscliv2.zip
 else
-    echo "AWS CLI already installed: $(aws --version)"
+    log_message "AWS CLI already installed: $(aws --version)"
 fi
-
-# Simple logging function
-log_message() {
-    local message="$1"
-    echo "$message"
-}
 
 # Wait for cloud-init to complete
 log_message "Waiting for cloud-init to complete..."
@@ -58,6 +59,7 @@ set -e
 log_message() {
     local msg="$1"
     echo "$msg"
+    logger -t "ansible-setup" "$msg"
 }
 cd /home/ubuntu/ansible
 ANSIBLE_HOST_KEY_CHECKING=False

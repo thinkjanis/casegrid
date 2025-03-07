@@ -1,10 +1,15 @@
 # Enable error handling
 $ErrorActionPreference = "Stop"
 
-# Simple function to log messages
+# Simple function to log messages to console and EC2 console log
 function Write-Log {
     param($Message)
+    
+    # Write to PowerShell console
     Write-Host $Message
+    
+    # Write to EC2 Console Log (via COM1 serial port)
+    $Message | Out-File -FilePath '\\.\COM1' -Append
 }
 
 try {
