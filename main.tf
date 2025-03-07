@@ -1,31 +1,8 @@
 # ---------------------------------------------------------------------------------------------------------------------
-# CLOUD WATCH LOG GROUPS
-# ---------------------------------------------------------------------------------------------------------------------
-resource "aws_cloudwatch_log_group" "windows_setup_logs" {
-  name              = "/${var.project_name}/${var.environment}/windows-setup"
-  retention_in_days = 30
-  
-  tags = {
-    Name        = "${var.project_name}-windows-logs"
-    Environment = var.environment
-  }
-}
-
-resource "aws_cloudwatch_log_group" "ansible_setup_logs" {
-  name              = "/${var.project_name}/${var.environment}/ansible-setup"
-  retention_in_days = 30
-  
-  tags = {
-    Name        = "${var.project_name}-ansible-logs"
-    Environment = var.environment
-  }
-}
-
-# ---------------------------------------------------------------------------------------------------------------------
 # SECURITY CONFIGURATION
 # ---------------------------------------------------------------------------------------------------------------------
 
-# Security Group for Windows Server
+# Security Group for Windows Server - Controls inbound/outbound traffic for the Windows web server
 resource "aws_security_group" "windows_sg" {
   name        = "${var.project_name}-windows-sg"
   description = "Security group for Windows Server"
@@ -72,7 +49,7 @@ resource "aws_security_group" "windows_sg" {
   }
 }
 
-# Security Group for Ansible Control Node
+# Security Group for Ansible Control Node - Controls outbound traffic for the Ansible controller
 resource "aws_security_group" "ansible_sg" {
   name        = "${var.project_name}-ansible-sg"
   description = "Security group for Ansible control node"
@@ -92,18 +69,23 @@ resource "aws_security_group" "ansible_sg" {
   }
 }
 
-# Generate SSH key for the Ubuntu instance
+# Generate SSH key for the Ubuntu instance - Used for emergency SSH access to Ansible control node
 resource "tls_private_key" "ubuntu_ssh_key" {
   algorithm = "RSA"
   rsa_bits  = 2048
 }
 
-# Add the public key to AWS
+# Add the public key to AWS - Associates the generated SSH key with the Ansible control node
 resource "aws_key_pair" "ubuntu_key" {
   key_name   = "${var.project_name}-ubuntu-key"
   public_key = tls_private_key.ubuntu_ssh_key.public_key_openssh
 }
 
+# ---------------------------------------------------------------------------------------------------------------------
+# CONFIGURATION TEMPLATES
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Windows PowerShell setup script template - Configures Windows server during initialization
 data "template_file" "windows_script" {
   template = file("${path.module}/scripts/windows.ps1")
   vars = {
@@ -113,6 +95,7 @@ data "template_file" "windows_script" {
   }
 }
 
+# Ansible inventory template - Defines the target Windows hosts for Ansible
 data "template_file" "ansible_inventory" {
   template = file("${path.module}/scripts/inventory.ini")
   vars = {
@@ -121,13 +104,13 @@ data "template_file" "ansible_inventory" {
   }
 }
 
+# Ansible setup script template - Configures the Ansible control node and schedules playbook execution
 data "template_file" "ansible_setup" {
   template = file("${path.module}/scripts/ansible_setup.sh")
   vars = {
     ansible_config      = file("${path.module}/scripts/ansible.cfg")
     ansible_inventory   = data.template_file.ansible_inventory.rendered
     ansible_playbook    = file("${path.module}/scripts/install_iis.yml")
-    validation_playbook = file("${path.module}/scripts/validate_connection.yml")
     project_name        = var.project_name
     environment         = var.environment
   }
@@ -137,7 +120,7 @@ data "template_file" "ansible_setup" {
 # EC2 INSTANCES
 # ---------------------------------------------------------------------------------------------------------------------
 
-# Windows Server Instance
+# Windows Server Instance - Primary web server running IIS
 resource "aws_instance" "windows_server" {
   ami                  = var.windows_ami
   instance_type        = var.windows_instance_type
@@ -151,10 +134,6 @@ resource "aws_instance" "windows_server" {
               </powershell>
               EOF
 
-  # Ensure the log group exists before the instance starts
-  # This prevents loss of early logs during instance initialization
-  depends_on = [aws_cloudwatch_log_group.windows_setup_logs]
-
   tags = {
     Name        = "${var.project_name}-windows"
     Environment = var.environment
@@ -162,7 +141,7 @@ resource "aws_instance" "windows_server" {
   }
 }
 
-# Ansible Control Node Instance (Ubuntu)
+# Ansible Control Node Instance (Ubuntu) - Manages Windows server configuration
 resource "aws_instance" "ansible_control" {
   ami                    = var.ansible_ami
   instance_type          = var.ansible_instance_type
@@ -182,7 +161,5 @@ resource "aws_instance" "ansible_control" {
   depends_on = [
     aws_nat_gateway.nat_gateway,
     aws_instance.windows_server,
-    aws_secretsmanager_secret_version.windows_password,
-    aws_cloudwatch_log_group.ansible_setup_logs
   ]
 }

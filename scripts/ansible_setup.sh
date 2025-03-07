@@ -15,26 +15,11 @@ else
     echo "AWS CLI already installed: $(aws --version)"
 fi
 
-# CloudWatch Log configuration
-LOG_GROUP="/${project_name}/${environment}/ansible-setup"
-LOG_STREAM="ansible-$(date +%Y-%m-%d-%H-%M-%S)"
-
 # Simple logging function
 log_message() {
     local message="$1"
-    aws logs put-log-events \
-        --log-group-name "$LOG_GROUP" \
-        --log-stream-name "$LOG_STREAM" \
-        --log-events timestamp=$(date +%s000),message="$message" 2>/dev/null || echo "Failed to log to CloudWatch: $message"
     echo "$message"
 }
-
-# Setup CloudWatch logs
-aws logs create-log-group --log-group-name "$LOG_GROUP" 2>/dev/null || true
-aws logs create-log-stream --log-group-name "$LOG_GROUP" --log-stream-name "$LOG_STREAM" 2>/dev/null || true
-
-# Redirect stdout to logging function
-exec > >(while read -r line; do log_message "$line"; done) 2>&1
 
 # Wait for cloud-init to complete
 log_message "Waiting for cloud-init to complete..."
@@ -63,7 +48,6 @@ log_message "Setting up Ansible..."
 mkdir -p /etc/ansible /home/ubuntu/ansible
 echo "${ansible_config}" > /etc/ansible/ansible.cfg
 echo "${ansible_inventory}" > /etc/ansible/hosts
-echo "${validation_playbook}" > /home/ubuntu/ansible/validate_connection.yml
 echo "${ansible_playbook}" > /home/ubuntu/ansible/install_iis.yml
 
 # Create and schedule playbook execution script
@@ -73,13 +57,10 @@ cat > /home/ubuntu/ansible/run_playbook.sh <<'EOL'
 set -e
 log_message() {
     local msg="$1"
-    aws logs put-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$LOG_STREAM" --log-events timestamp=$(date +%s000),message="$msg" 2>/dev/null || echo "Failed to log: $msg"
     echo "$msg"
 }
 cd /home/ubuntu/ansible
 ANSIBLE_HOST_KEY_CHECKING=False
-log_message "Validating connection..."
-ansible-playbook validate_connection.yml -v || { log_message "Validation failed"; exit 1; }
 log_message "Installing IIS..."
 ansible-playbook install_iis.yml -v || { log_message "IIS installation failed"; exit 1; }
 log_message "Setup completed successfully"

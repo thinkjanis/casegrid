@@ -2,7 +2,7 @@
 # IAM ROLES AND POLICIES
 # ---------------------------------------------------------------------------------------------------------------------
 
-# Windows Server Role
+# Windows Server Role - Base IAM role for Windows server EC2 instance
 resource "aws_iam_role" "windows_server_role" {
   name = "${var.project_name}-windows-server-role"
 
@@ -25,41 +25,19 @@ resource "aws_iam_role" "windows_server_role" {
   }
 }
 
-# Windows Server SSM Policy
+# Windows Server SSM Policy - Enables Systems Manager functionality for Windows server
 resource "aws_iam_role_policy_attachment" "windows_ssm_policy" {
   role       = aws_iam_role.windows_server_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# Windows Server CloudWatch Policy
-resource "aws_iam_role_policy" "windows_cloudwatch_policy" {
-  name = "${var.project_name}-windows-cloudwatch-policy"
-  role = aws_iam_role.windows_server_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-          "logs:DescribeLogStreams"
-        ]
-        Resource = ["arn:aws:logs:*:*:*"]
-      }
-    ]
-  })
-}
-
-# Windows Server Instance Profile
+# Windows Server Instance Profile - Associates IAM role with Windows EC2 instance
 resource "aws_iam_instance_profile" "windows_server_profile" {
   name = "${var.project_name}-windows-server-profile"
   role = aws_iam_role.windows_server_role.name
 }
 
-# Ansible Control Node Role
+# Ansible Control Node Role - Base IAM role for Ansible control node EC2 instance
 resource "aws_iam_role" "ansible_control_role" {
   name = "${var.project_name}-ansible-control-role"
 
@@ -82,7 +60,7 @@ resource "aws_iam_role" "ansible_control_role" {
   }
 }
 
-# Ansible Control Node Custom Policy for Secrets Manager
+# Ansible Control Node Custom Policy for Secrets Manager - Allows access to Windows admin password
 resource "aws_iam_role_policy" "ansible_secrets_policy" {
   name = "${var.project_name}-ansible-secrets-policy"
   role = aws_iam_role.ansible_control_role.id
@@ -104,35 +82,13 @@ resource "aws_iam_role_policy" "ansible_secrets_policy" {
   })
 }
 
-# Ansible Control Node SSM Policy
+# Ansible Control Node SSM Policy - Enables Systems Manager functionality for Ansible node
 resource "aws_iam_role_policy_attachment" "ansible_ssm_policy" {
   role       = aws_iam_role.ansible_control_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# Ansible Control Node CloudWatch Policy
-resource "aws_iam_role_policy" "ansible_cloudwatch_policy" {
-  name = "${var.project_name}-ansible-cloudwatch-policy"
-  role = aws_iam_role.ansible_control_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-          "logs:DescribeLogStreams"
-        ]
-        Resource = ["arn:aws:logs:*:*:*"]
-      }
-    ]
-  })
-}
-
-# Ansible Control Node SSM Control Policy
+# Ansible Control Node SSM Control Policy - Enables management of Windows server via SSM
 resource "aws_iam_role_policy" "ansible_ssm_control_policy" {
   name = "${var.project_name}-ansible-ssm-control-policy"
   role = aws_iam_role.ansible_control_role.id
@@ -216,20 +172,20 @@ resource "aws_iam_role_policy" "ansible_ssm_control_policy" {
   })
 }
 
-# Add this data source at the top of the file (after provider block)
+# Get current AWS account information for use in IAM policies
 data "aws_caller_identity" "current" {}
 
-# Ansible Control Node Instance Profile
+# Ansible Control Node Instance Profile - Associates IAM role with Ansible EC2 instance
 resource "aws_iam_instance_profile" "ansible_control_profile" {
   name = "${var.project_name}-ansible-control-profile"
   role = aws_iam_role.ansible_control_role.name
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
-# SECRETS MANAGER
+# SECRETS MANAGER - Securely stores sensitive information
 # ---------------------------------------------------------------------------------------------------------------------
 
-# Windows Server Administrator Password
+# Windows Server Administrator Password - Stores the Windows admin credentials
 resource "aws_secretsmanager_secret" "windows_password" {
   name = "${var.project_name}/${var.environment}/windows-admin-password"
   force_overwrite_replica_secret = true

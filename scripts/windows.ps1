@@ -1,30 +1,10 @@
 # Enable error handling
 $ErrorActionPreference = "Stop"
 
-# CloudWatch configuration
-$logGroupName = "/${project_name}/${environment}/windows-setup"
-$logStreamName = $env:COMPUTERNAME + "-" + (Get-Date).ToString("yyyy-MM-dd-HH-mm-ss")
-
 # Simple function to log messages
 function Write-Log {
     param($Message)
     Write-Host $Message
-    try {
-        Write-CWLog -LogGroupName $logGroupName -LogStreamName $logStreamName -LogEvent @{
-            Timestamp = (Get-Date).ToUniversalTime()
-            Message = $Message
-        }
-    } catch {
-        Write-Host "Failed to write to CloudWatch: $_"
-    }
-}
-
-# Create log group and stream
-try {
-    New-CWLLogGroup -LogGroupName $logGroupName -ErrorAction SilentlyContinue
-    New-CWLLogStream -LogGroupName $logGroupName -LogStreamName $logStreamName -ErrorAction SilentlyContinue
-} catch {
-    Write-Host "WARNING: Failed to setup CloudWatch logging: $_"
 }
 
 try {

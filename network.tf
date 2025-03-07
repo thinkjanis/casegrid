@@ -1,4 +1,8 @@
-# Create VPC
+# ---------------------------------------------------------------------------------------------------------------------
+# VPC AND SUBNET CONFIGURATION
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Create VPC - Main network container for all resources
 resource "aws_vpc" "casegrid_vpc" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
@@ -10,7 +14,7 @@ resource "aws_vpc" "casegrid_vpc" {
   }
 }
 
-# Public Subnet
+# Public Subnet - Hosts Windows server with internet access
 resource "aws_subnet" "public_subnet" {
   vpc_id            = aws_vpc.casegrid_vpc.id
   cidr_block        = var.public_subnet_cidr
@@ -23,7 +27,7 @@ resource "aws_subnet" "public_subnet" {
   }
 }
 
-# Private Subnet
+# Private Subnet - Hosts Ansible control node with no direct internet access
 resource "aws_subnet" "private_subnet" {
   vpc_id            = aws_vpc.casegrid_vpc.id
   cidr_block        = var.private_subnet_cidr
@@ -35,7 +39,11 @@ resource "aws_subnet" "private_subnet" {
   }
 }
 
-# Internet Gateway
+# ---------------------------------------------------------------------------------------------------------------------
+# NETWORK GATEWAYS AND ROUTING
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Internet Gateway - Enables internet access for public subnet resources
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.casegrid_vpc.id
 
@@ -45,7 +53,7 @@ resource "aws_internet_gateway" "igw" {
   }
 }
 
-# Elastic IP for NAT Gateway
+# Elastic IP for NAT Gateway - Static IP for outbound internet access from private subnet
 resource "aws_eip" "nat_eip" {
   domain = "vpc"
 
@@ -55,7 +63,7 @@ resource "aws_eip" "nat_eip" {
   }
 }
 
-# NAT Gateway
+# NAT Gateway - Enables outbound internet access for private subnet resources
 resource "aws_nat_gateway" "nat_gateway" {
   allocation_id = aws_eip.nat_eip.id
   subnet_id     = aws_subnet.public_subnet.id
@@ -70,7 +78,7 @@ resource "aws_nat_gateway" "nat_gateway" {
   ]
 }
 
-# Public Route Table
+# Public Route Table - Routes traffic from public subnet to internet via IGW
 resource "aws_route_table" "public_rt" {
   vpc_id = aws_vpc.casegrid_vpc.id
 
@@ -85,7 +93,7 @@ resource "aws_route_table" "public_rt" {
   }
 }
 
-# Private Route Table
+# Private Route Table - Routes traffic from private subnet to internet via NAT Gateway
 resource "aws_route_table" "private_rt" {
   vpc_id = aws_vpc.casegrid_vpc.id
 
@@ -100,7 +108,7 @@ resource "aws_route_table" "private_rt" {
   }
 }
 
-# Route Table Associations
+# Route Table Associations - Links subnets with their respective route tables
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public_subnet.id
   route_table_id = aws_route_table.public_rt.id
@@ -111,7 +119,11 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private_rt.id
 }
 
-# Security Group for VPC Endpoints
+# ---------------------------------------------------------------------------------------------------------------------
+# VPC ENDPOINTS FOR AWS SERVICES
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Security Group for VPC Endpoints - Controls access to AWS service endpoints
 resource "aws_security_group" "vpce_sg" {
   name        = "${var.project_name}-vpce-sg"
   description = "Security group for VPC Endpoints"
@@ -131,7 +143,7 @@ resource "aws_security_group" "vpce_sg" {
   }
 }
 
-# VPC Endpoints for SSM connectivity
+# SSM Endpoint - Enables Systems Manager access for instance management
 resource "aws_vpc_endpoint" "ssm" {
   vpc_id             = aws_vpc.casegrid_vpc.id
   service_name       = "com.amazonaws.${var.aws_region}.ssm"
@@ -146,6 +158,7 @@ resource "aws_vpc_endpoint" "ssm" {
   }
 }
 
+# SSM Messages Endpoint - Enables session management for SSM
 resource "aws_vpc_endpoint" "ssmmessages" {
   vpc_id             = aws_vpc.casegrid_vpc.id
   service_name       = "com.amazonaws.${var.aws_region}.ssmmessages"
@@ -160,6 +173,7 @@ resource "aws_vpc_endpoint" "ssmmessages" {
   }
 }
 
+# EC2 Messages Endpoint - Enables EC2 instance communication with SSM
 resource "aws_vpc_endpoint" "ec2messages" {
   vpc_id             = aws_vpc.casegrid_vpc.id
   service_name       = "com.amazonaws.${var.aws_region}.ec2messages"
@@ -174,20 +188,7 @@ resource "aws_vpc_endpoint" "ec2messages" {
   }
 }
 
-resource "aws_vpc_endpoint" "logs" {
-  vpc_id             = aws_vpc.casegrid_vpc.id
-  service_name       = "com.amazonaws.${var.aws_region}.logs"
-  vpc_endpoint_type  = "Interface"
-  subnet_ids         = [aws_subnet.private_subnet.id]
-  security_group_ids = [aws_security_group.vpce_sg.id]
-  private_dns_enabled = true
-
-  tags = {
-    Name        = "${var.project_name}-logs-endpoint"
-    Environment = var.environment
-  }
-}
-
+# S3 Gateway Endpoint - Enables access to S3 for SSM patches and resources
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.casegrid_vpc.id
   service_name      = "com.amazonaws.${var.aws_region}.s3"

@@ -17,13 +17,7 @@ terraform {
     }
   }
 
-  backend "remote" {
-    organization = "thinkjanis"
-
-    workspaces {
-      name = "casegrid"
-    }
-  }
+  backend "remote" {}
 }
 
 provider "aws" {
