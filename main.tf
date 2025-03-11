@@ -85,35 +85,27 @@ resource "aws_key_pair" "ubuntu_key" {
 # CONFIGURATION TEMPLATES
 # ---------------------------------------------------------------------------------------------------------------------
 
-# Windows PowerShell setup script template - Configures Windows server during initialization
-data "template_file" "windows_script" {
-  template = file("${path.module}/scripts/windows.ps1")
-  vars = {
+locals {
+  windows_script = templatefile("${path.module}/scripts/windows.ps1", {
     admin_password = random_password.windows_password.result
     project_name   = var.project_name
     environment    = var.environment
-  }
-}
+  })
 
-# Ansible inventory template - Defines the target Windows hosts for Ansible
-data "template_file" "ansible_inventory" {
-  template = file("${path.module}/scripts/inventory.ini")
-  vars = {
+  # Ansible inventory using templatefile function
+  ansible_inventory = templatefile("${path.module}/scripts/inventory.ini", {
     windows_dns = aws_instance.windows_server.private_dns
     aws_region  = var.aws_region
-  }
-}
+  })
 
-# Ansible setup script template - Configures the Ansible control node and schedules playbook execution
-data "template_file" "ansible_setup" {
-  template = file("${path.module}/scripts/ansible_setup.sh")
-  vars = {
+  # Ansible setup script using templatefile function
+  ansible_setup = templatefile("${path.module}/scripts/ansible_setup.sh", {
     ansible_config      = file("${path.module}/scripts/ansible.cfg")
-    ansible_inventory   = data.template_file.ansible_inventory.rendered
+    ansible_inventory   = local.ansible_inventory
     ansible_playbook    = file("${path.module}/scripts/install_iis.yml")
     project_name        = var.project_name
     environment         = var.environment
-  }
+  })
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -130,7 +122,7 @@ resource "aws_instance" "windows_server" {
 
   user_data = <<-EOF
               <powershell>
-              ${data.template_file.windows_script.rendered}
+              ${local.windows_script}
               </powershell>
               EOF
 
@@ -150,7 +142,7 @@ resource "aws_instance" "ansible_control" {
   vpc_security_group_ids = [aws_security_group.ansible_sg.id]
   key_name               = aws_key_pair.ubuntu_key.key_name
 
-  user_data = data.template_file.ansible_setup.rendered
+  user_data = local.ansible_setup
 
   tags = {
     Name        = "${var.project_name}-ansible-control"
